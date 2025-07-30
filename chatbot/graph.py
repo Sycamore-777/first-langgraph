@@ -38,7 +38,7 @@ def get_weather(city: str) -> str:
     return f"{city}天气晴朗"
 
 # 初始化Tavily搜索工具
-tavily_search_tool = TavilySearch(max_results=5,topic="general",tavily_api_key=os.getenv("TAVILY_KEY"))
+tavily_search_tool = TavilySearch(max_results=5,topic="general",tavily_api_key=os.getenv("TAVILY_API_KEY"))
 
 # 大模型架加载
 API_KEY = os.getenv("API_KEY")
@@ -61,27 +61,3 @@ config = {
 
 # 智能体构建
 agent = create_react_agent(model=model, tools=tools)
-# agent = create_react_agent(model=model, tools=tools, checkpointer=checkpoint)
-
-# # 使用智能体进行对话
-# while True:
-#     user_input = input("🙋：")
-#     if user_input.lower() == 'quit':
-#         break
-#     response = agent.invoke(
-#         {
-#             "messages": [
-#                 {"role": "system", "content": "你是一个乐于助人的助手，请根据用户的问题给出回答"},
-#                 {"role": "user", "content": user_input}
-#             ]
-#         },
-#         # {"recursion_limit":10}, # 设置递归限制,包括用户消息，工具调用，工具响应，最终响应等
-#         config=config  # 配置参数
-#     )
-#     print(f'🤖：{response["messages"][-1].content}')
-
-
-# # 打印响应结果
-# print(response)
-# print("=="*30)
-# print(response["messages"][-1].content)

@@ -1,0 +1,7 @@
+{
+    "dependencies": ["../"],
+    "graphs": {
+        "databot": "./databot.py:graph"
+    },
+    "env": "../.env"
+}
