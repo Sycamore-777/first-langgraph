@@ -11,7 +11,9 @@ from dotenv import load_dotenv
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, interrupt
-
+'''
+创建并行的工作流
+'''
 # 加载环境变量
 load_dotenv(override=True)
 

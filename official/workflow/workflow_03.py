@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict, Literal
 from langchain_core.tools import InjectedToolCallId,tool
 
 from langgraph.graph import StateGraph, START, END
@@ -11,7 +11,11 @@ from dotenv import load_dotenv
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, interrupt
-
+from pydantic import BaseModel,Field
+from langchain_core.messages import HumanMessage, SystemMessage
+'''
+创建具有路由结构的工作流
+'''
 # 加载环境变量
 load_dotenv(override=True)
 
@@ -21,62 +25,91 @@ api_key = os.getenv("API_KEY")
 base_url = os.getenv("BASE_URL")
 llm = init_chat_model(model=model, base_url=base_url,api_key=api_key)
 
+# 创建输出模板
+class Route(BaseModel):
+    step: Literal["joke", "story", "poem"] = Field(None, description= "路由节点的下一步")
+
+# 升级模型
+router= llm.with_structured_output(Route) # 增加结构化输出
+
 # 创建图模板
 class State(TypedDict):
-    topic: str
-    joke: str
-    story: str
-    poem: str
-    combined_output: str
+    input: str
+    decision: str
+    output: str
 
 # 创建节点函数
-def call_llm_1(state: State):
+def llm_call_1(state: State):
     """First LLM call to generate initial joke"""
 
-    msg = llm.invoke(f"写一个主题为 {state['topic']}的笑话")
-    return {"joke": msg.content}
+    msg = llm.invoke(state["input"])
+    return {"output": msg.content}
 
 
-def call_llm_2(state: State):
+def llm_call_2(state: State):
     """Second LLM call to generate story"""
 
-    msg = llm.invoke(f"写一个主题为 {state['topic']}的故事")
-    return {"story": msg.content}
+    msg = llm.invoke(state["input"])
+    return {"output": msg.content}
 
 
-def call_llm_3(state: State):
+def llm_call_3(state: State):
     """Third LLM call to generate poem"""
 
-    msg = llm.invoke(f"写一个主题为 {state['topic']}的诗词")
-    return {"poem": msg.content}
+    msg = llm.invoke(state["input"])
+    return {"output": msg.content}
 
 
-def aggregator(state: State):
+def llm_call_router(state: State):
+    '''
+    使用大模型辅助进行路由结果选择，并且输出结构化的路由结果
+    '''
     """Combine the joke and story into a single output"""
+    decision= router.invoke([
+        {"role":"system", "content":"基于用户的输入，请从 joke、story、poem 中选择一个作为下一步的输出"},
+        {"role":"user", "content":state["input"]}
+    ])
+    # TODO 测试一下这两种方式有什么区别
+    # decision = router.invoke(
+    #     [
+    #         SystemMessage(
+    #             content="Route the input to story, joke, or poem based on the user's request."
+    #         ),
+    #         HumanMessage(content=state["input"]),
+    #     ]
+    # )
+    return {"decision": decision.step}
 
-    combined = f"下面是关于 {state['topic']}主题的故事、笑话和诗歌!\n\n"
-    combined += f"故事:\n{state['story']}\n\n"
-    combined += f"笑话:\n{state['joke']}\n\n"
-    combined += f"诗歌:\n{state['poem']}"
-    return {"combined_output": combined}
+# 创建路由条件
+def route_decision(state: State):
+    # Return the node name you want to visit next
+    if state["decision"] == "story":
+        return "llm_call_1"
+    elif state["decision"] == "joke":
+        return "llm_call_2"
+    elif state["decision"] == "poem":
+        return "llm_call_3"
 
 # 创建图
 graph_builder = StateGraph(State)
 
 # 创建节点
-graph_builder.add_node("call_llm_1", call_llm_1)
-graph_builder.add_node("call_llm_2", call_llm_2)
-graph_builder.add_node("call_llm_3", call_llm_3)
-graph_builder.add_node("aggregator", aggregator)
+graph_builder.add_node("llm_call_router",llm_call_router)
+graph_builder.add_node("llm_call_1",llm_call_1)
+graph_builder.add_node("llm_call_2",llm_call_2)
+graph_builder.add_node("llm_call_3",llm_call_3)
 
 # 创建边
-graph_builder.add_edge(START, "call_llm_1")
-graph_builder.add_edge(START, "call_llm_2")
-graph_builder.add_edge(START, "call_llm_3")
-graph_builder.add_edge("call_llm_1", "aggregator")
-graph_builder.add_edge("call_llm_2", "aggregator")
-graph_builder.add_edge("call_llm_3", "aggregator")
-graph_builder.add_edge("aggregator", END)
+graph_builder.add_edge(START, "llm_call_router")
+graph_builder.add_conditional_edges(
+    "llm_call_router", 
+    route_decision,
+    {"llm_call_1": "llm_call_1", 
+     "llm_call_2": "llm_call_2", 
+     "llm_call_3": "llm_call_3"})
+graph_builder.add_edge("llm_call_1", END)
+graph_builder.add_edge("llm_call_2", END)
+graph_builder.add_edge("llm_call_3", END)
 
 # 编译图
 graph = graph_builder.compile()
@@ -86,18 +119,25 @@ if __name__ == "__main__":
     # 可视化
     from IPython.display import Image, display
     try:
-        display(Image(graph.get_graph().draw_mermaid_png()))
-    except Exception:
-        # This requires some extra dependencies and is optional
-        pass
-    try:
-        img_bytes = graph.get_graph().draw_mermaid_png()
-        with open("chatbot_graph.png", "wb") as f:
-            f.write(img_bytes)
-        print("流程图已保存为 chatbot_graph.png")
-    except Exception:
-        print("可视化失败，可能缺少依赖。")
+        display(Image(graph.get_graph().draw_png()))
+    except ImportError:
+        print(
+            "You likely need to install dependencies for pygraphviz, see more here https://github.com/pygraphviz/pygraphviz/blob/main/INSTALL.txt"
+        )
+    # from IPython.display import Image, display
+    # try:
+    #     display(Image(graph.get_graph().draw_mermaid_png()))
+    # except Exception:
+    #     # This requires some extra dependencies and is optional
+    #     pass
+    # try:
+    #     img_bytes = graph.get_graph().draw_mermaid_png()
+    #     with open("chatbot_graph.png", "wb") as f:
+    #         f.write(img_bytes)
+    #     print("流程图已保存为 chatbot_graph.png")
+    # except Exception:
+    #     print("可视化失败，可能缺少依赖。")
 
     # 推理
-    state = graph.invoke({"topic": "喜剧"})
-    print(state["combined_output"])
+    state = graph.invoke({"input": "写一个关于朱棣的笑话"})
+    print(state["output"])
