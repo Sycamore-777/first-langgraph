@@ -1,7 +1,7 @@
 {
     "dependencies": ["../../"],
     "graphs": {
-        "databot": "./workflow_04.py:graph"
+        "databot": "./workflow_07.py:graph"
     },
     "env": "./.env"
 }
